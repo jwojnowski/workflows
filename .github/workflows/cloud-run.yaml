@@ -1,0 +1,51 @@
+name: Build and deploy to Google Cloud Run
+
+on:
+  workflow_call:
+    inputs:
+      service_name:
+        required: true
+        type: string
+    secrets:
+      gcp_key_file:
+        required: true
+      # a sad workaround for Environments feature in private, free GitHub repostiories
+      gcp_project_id:
+        required: true
+      gcp_region:
+        required: true
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    container: google/cloud-sdk
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build docker image
+        env:
+          SERVICE_NAME: ${{ inputs.service_name }}
+          GCP_PROJECT_ID: ${{ secrets.gcp_project_id }}
+        run: |
+         echo ${{secrets.gcp_key_file}} | base64 -d | gcloud auth activate-service-account --key-file /dev/stdin
+         gcloud config set project $GCP_PROJECT_ID
+         gcloud auth configure-docker
+         docker build . --file Dockerfile --tag "gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:${GITHUB_REF#refs/tags/}"
+         docker push "gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:${GITHUB_REF#refs/tags/}"
+
+  deploy:
+    runs-on: ubuntu-latest
+    container: google/cloud-sdk
+    needs: build
+    steps:
+      - name: Deploy to Cloud Run
+        env:
+          SERVICE_NAME: ${{ inputs.service_name }}
+          GCP_PROJECT_ID: ${{ secrets.gcp_project_id }}
+          GCP_REGION: ${{ secrets.gcp_region }}
+        run: |
+          echo ${{ secrets.gcp_key_file }} | base64 -d | gcloud auth activate-service-account --key-file /dev/stdin
+          gcloud config set project $GCP_PROJECT_ID
+          gcloud run deploy $SERVICE_NAME --image "gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:${GITHUB_REF#refs/tags/}" --region=$GCP_REGION --platform=managed
+          gcloud run services update-traffic $SERVICE_NAME --to-latest --region=$GCP_REGION

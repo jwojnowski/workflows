@@ -6,6 +6,10 @@ on:
       service_name:
         required: true
         type: string
+      repository_name:
+        required: false
+        type: string
+        default: docker
     secrets:
       gcp_key_file:
         required: true
@@ -25,14 +29,14 @@ jobs:
       - uses: actions/checkout@v2
       - name: Build docker image
         env:
-          SERVICE_NAME: ${{ inputs.service_name }}
-          GCP_PROJECT_ID: ${{ secrets.gcp_project_id }}
+          IMAGE: ${{secrets.gcp_region}}-docker.pkg.dev/${{ secrets.gcp_project_id }}/${{inputs.repository_name}}/${{inputs.service_name}}
         run: |
          echo ${{secrets.gcp_key_file}} | base64 -d | gcloud auth activate-service-account --key-file /dev/stdin
-         gcloud config set project $GCP_PROJECT_ID
-         gcloud auth configure-docker
-         docker build . --file Dockerfile --tag "gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:${GITHUB_REF#refs/tags/}"
-         docker push "gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:${GITHUB_REF#refs/tags/}"
+         gcloud config set project ${{ secrets.gcp_project_id }}
+         gcloud auth configure-docker ${{secrets.gcp_region}}-docker.pkg.dev
+         docker build . --file Dockerfile --tag "$IMAGE:${GITHUB_REF#refs/tags/}" --tag "$IMAGE:latest"
+         docker push "$IMAGE:${GITHUB_REF#refs/tags/}"
+         docker push "$IMAGE:latest"
 
   deploy:
     runs-on: ubuntu-latest
@@ -44,8 +48,9 @@ jobs:
           SERVICE_NAME: ${{ inputs.service_name }}
           GCP_PROJECT_ID: ${{ secrets.gcp_project_id }}
           GCP_REGION: ${{ secrets.gcp_region }}
+          IMAGE: ${{secrets.gcp_region}}-docker.pkg.dev/${{ secrets.gcp_project_id }}/${{inputs.repository_name}}/${{inputs.service_name}}
         run: |
           echo ${{ secrets.gcp_key_file }} | base64 -d | gcloud auth activate-service-account --key-file /dev/stdin
           gcloud config set project $GCP_PROJECT_ID
-          gcloud run deploy $SERVICE_NAME --image "gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:${GITHUB_REF#refs/tags/}" --region=$GCP_REGION --platform=managed
+          gcloud run deploy $SERVICE_NAME --image "$IMAGE:${GITHUB_REF#refs/tags/}" --region=$GCP_REGION --platform=managed
           gcloud run services update-traffic $SERVICE_NAME --to-latest --region=$GCP_REGION
